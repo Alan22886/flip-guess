@@ -1,0 +1,9 @@
+.DS_Store
+/翻转猜词_v*.html
+/node_modules/
+/dist/
+/test-results/
+/playwright-report/
+*.json
+!package.json
+!package-lock.json

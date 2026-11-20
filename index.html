@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"><meta content="#000000" name="theme-color"/><title>滑动猜词</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="color-scheme" content="dark">
+<meta name="apple-mobile-web-app-title" content="滑动猜词">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" type="image/png" href="./assets/icon-192.png">
+<link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
+<link rel="stylesheet" href="./css/style.css">
+</head><body>
+<div id="storageStatus" role="alert" hidden></div>
+<dialog id="messageDialog" aria-labelledby="messageText">
+  <p id="messageText"></p>
+  <button type="button" id="messageClose" class="primary">知道了</button>
+</dialog>
+<div aria-labelledby="resetConfirmTitle" aria-modal="true" class="confirmOverlay destructiveConfirm" id="resetConfirmDialog" role="dialog"><div class="confirmPanel"><h2 id="resetConfirmTitle"></h2><div class="pauseActions"><button id="resetCancel" type="button">取消</button><button class="danger" id="resetConfirm" type="button">确认清空</button></div><p id="resetConfirmDescription"></p></div></div><div aria-labelledby="endTitle" aria-modal="true" class="confirmOverlay destructiveConfirm" id="endDialog" role="dialog"><div class="confirmPanel"><h2 id="endTitle">确定结束游戏？</h2><div class="pauseActions"><button id="endCancel" type="button">取消</button><button class="danger" id="endConfirm" type="button">确定结束</button></div><p>返回主页，本局将记为中断。</p></div></div><div id="landscapeLaunch"><div class="launchContent"><div aria-label="本局游戏设置" class="launchRules" id="launchRules"><div class="launchRule"><span class="launchRuleLabel">游戏模式</span><strong id="launchModeValue">分组对战</strong></div><div class="launchRule"><span class="launchRuleLabel">每人时长</span><strong id="launchDurationValue">2 分钟</strong></div><div class="launchRule"><span class="launchRuleLabel">跳过扣分</span><strong id="launchPenaltyValue">不扣分</strong></div></div><div id="launchWordWarning" class="launchWordWarning" hidden>
+  <p id="launchWordWarningText" role="status"></p>
+  <label id="launchReuseLabel" hidden><input id="reuseWords" type="checkbox"> 词不够时，仅复用所选类别的旧词</label>
+</div>
+<div id="launchSavedMatch" class="savedMatchPanel" hidden><p id="launchSavedSummary"></p><div><button id="launchRestore" class="primary continueAction" type="button">继续未完成对局</button><button id="launchDiscard" class="small" type="button">放弃进度</button></div></div>
+<button class="continueAction" id="landscapeLaunchButton" type="button">开始猜</button></div></div>
+<div class="screen setup on" id="setup"><div class="titleStage"><h1 class="artTitle" id="setupTitle" data-text="滑动猜词">滑动猜词</h1><div class="fireworks" id="titleFireworks" aria-hidden="true"></div></div>
+<div class="startStandalone startTop"><button class="primary continueAction" id="startTop" type="button"><span class="startLabel">请横屏后开始</span><span class="startRotateIcon" aria-hidden="true">↻</span></button></div>
+<section id="setupSavedMatch" class="savedMatchPanel settingPanel" hidden><p id="setupSavedSummary"></p><div><button id="setupRestore" class="primary continueAction" type="button">继续未完成对局</button><button id="setupDiscard" class="small" type="button">放弃进度</button></div></section>
+<div class="config configV11">
+<section class="settingPanel">
+  <div class="settingHeading" id="modeHeading">游戏模式</div>
+  <div id="mode" class="modeToggle" role="radiogroup" aria-labelledby="modeHeading">
+    <label><input type="radio" name="game-mode" value="team" checked><span>分组对战<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="9" cy="7.5" r="3"/><path d="M3 19v-1.5a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4V19m1-14.4a3 3 0 0 1 0 5.8m1.5 3.1a4 4 0 0 1 3.5 4V19"/></svg></span></label>
+    <label><input type="radio" name="game-mode" value="solo"><span>各自为战<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="12" cy="7.5" r="3"/><path d="M6 19v-1.5a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4V19"/></svg></span></label>
+  </div>
+</section>
+<section class="settingPanel"><div class="settingHeading">游戏规则</div><div class="settingBody ruleBody"><label class="durationRow">每人时长 <input id="duration" max="5" min="1" step="1" type="number" value="2"/></label><label class="penaltyRow"><input id="penalty" type="checkbox"/> 跳过扣 1 分</label></div></section>
+<section class="settingPanel" id="peopleSettings"><div class="settingHeading">人数设置</div><div class="settingBody"><label class="settingNumber" id="teamCountWrap">组数 <input id="teamCount" max="12" min="2" type="number" value="2"/></label><label class="settingNumber" id="soloCountWrap" style="display:none">玩家人数 <input id="soloCount" max="30" min="1" type="number" value="4"/></label><div class="teamconfig" id="teamConfig"></div></div></section>
+</div><section id="nameConfig" class="settingPanel"><div class="nameConfigHeader"><div class="settingHeading">玩家昵称</div><button class="small" id="clearNicknames" type="button">一键清空</button></div><div id="nameInputs"></div></section><section class="settingPanel categorySection" aria-labelledby="categoryHeading"><div class="categoryTitle"><div class="settingHeading" id="categoryHeading">选择词库类别</div><button aria-pressed="true" class="categoryToggle" id="all" type="button">全选</button><button class="categoryToggle" id="manageWords" type="button" aria-label="管理词库"><span aria-hidden="true">⚙</span></button></div><div class="cats" id="cats"></div><button id="toggleCategories" type="button" aria-controls="cats" aria-expanded="false" aria-label="展开全部词库类别"><span aria-hidden="true"></span></button></section><div class="startStandalone"><button class="primary continueAction" id="start"><span class="startLabel">请横屏后开始</span><span class="startRotateIcon" aria-hidden="true">↻</span></button><button id="revealSetupDetails" type="button" aria-controls="setupDetails" aria-expanded="false">更多设置与记录</button></div><section id="setupDetails" hidden>
+<section id="swipePreference" class="settingPanel"><div class="settingHeading" id="swipeHeading">交互方式</div><div class="modeToggle" role="radiogroup" aria-labelledby="swipeHeading"><label><input type="radio" name="swipeStyle" value="divider" checked><span>移动中线</span></label><label><input type="radio" name="swipeStyle" value="word"><span>移动单词</span></label></div></section>
+<section class="settingPanel" aria-labelledby="recordsHeading">
+<div class="settingHeading" id="recordsHeading">游戏记录</div>
+<div class="recordSummary"><div id="count"></div><div id="historyInfo"></div></div>
+<div class="recordTools"><button class="small" id="showHistory">游戏记录 / 已用词</button><button class="small" id="exportData">导出游戏记录 <span class="recordArrow" aria-hidden="true">↓</span></button><button class="small" id="importData">导入游戏记录 <span class="recordArrow" aria-hidden="true">↑</span></button><input accept=".json,application/json" id="importFile" style="display:none" type="file"/></div></section><div id="dataNotice">记录保存在本机，可导出备份。<div id="offlineStatus" role="status"></div></div></section></div>
+<div class="screen wordManager" id="wordManager"><div class="wmWrap"><div class="wmTop"><h2>词库管理</h2><button class="small" id="wmBack">返回主页</button></div><p class="wmNote">在此管理本机词库，也可用 JSON 批量导入或备份。</p><div class="wmToolbar"><button class="wmBlue" id="wmNewCategory" type="button">＋ 新建类别</button><button class="small" id="wmImport">导入词库 JSON</button><button class="small" id="wmExport">导出完整词库</button><button class="small" id="wmPrompt">复制 AI 扩词提示词</button><input type="file" id="wmFile" accept=".json,application/json" hidden></div><textarea id="wmPromptText" aria-label="扩词提示词" readonly hidden></textarea><div class="wmCreate" id="wmCreate" hidden><label for="wmCategoryName">新类别名称</label><div class="wmCreateInputs"><input id="wmCategoryName" maxlength="32" placeholder="例如：影视角色"><button class="wmBlue" id="wmCreateConfirm" type="button">确认创建</button><button class="small" id="wmCreateCancel" type="button">取消</button></div></div><div class="wmControls"><label for="wmCategory">当前类别<select id="wmCategory"></select></label></div>
+<section class="wmSection" aria-labelledby="wmAddTitle">
+  <h3 id="wmAddTitle">添加词语</h3>
+  <div class="wmAdd">
+    <label>简体词语<input id="wmHans" placeholder="必填" maxlength="80"></label>
+    <label>繁体词语<input id="wmHant" placeholder="选填，默认同简体" maxlength="80"></label>
+    <button class="primary" id="wmAddWord" type="button">添加词语</button>
+  </div>
+</section>
+<section class="wmSection wmBrowse" aria-labelledby="wmSearchTitle">
+  <h3 id="wmSearchTitle"><label for="wmSearch">搜索词语</label></h3>
+  <div class="wmSearchField">
+    <input id="wmSearch" type="search" placeholder="搜索当前类别的简体或繁体">
+    <button id="wmSearchClear" type="button" aria-label="清除搜索词语" hidden><span aria-hidden="true">×</span></button>
+  </div>
+  <div class="wmStatus" id="wmStatus" role="status" aria-live="polite"></div><div class="confirmOverlay" id="wmConfirm" role="dialog" aria-modal="true" aria-labelledby="wmConfirmTitle" aria-describedby="wmConfirmText" hidden><div class="confirmPanel"><h2 id="wmConfirmTitle"></h2><div class="pauseActions"><button type="button" id="wmConfirmCancel">取消</button><button type="button" id="wmConfirmYes">确认</button></div><p id="wmConfirmText"></p></div></div><div class="wmList" id="wmList"></div></section></div></div><div class="screen game" id="game"><div id="gameTools"><button id="undoAction">撤销</button><button aria-label="暂停" id="pauseAction" title="暂停">Ⅱ</button></div><div id="countdownOverlay"><div id="countdownTitle"></div><div id="countdownNumber">3</div></div><div id="pauseOverlay"><div class="confirmPanel"><h2>已暂停</h2><div class="pauseActions"><button class="continueAction" id="resumeAction">继续</button><button class="danger" id="restartRoundAction">结束</button></div></div></div><div id="roundTransition" hidden aria-hidden="true"></div><div class="tapzone pass" id="pass"><span class="tapFeedback" aria-hidden="true"></span><span class="taplabel"><span>跳过 <small id="passHint"></small></span><svg class="swipeHint" role="img" aria-label="左滑跳过" viewBox="0 0 48 64"><path d="M10 8l28 24-28 24"/></svg></span></div><div class="tapzone correct" id="correct"><span class="tapFeedback" aria-hidden="true"></span><span class="taplabel"><span>猜中 <small>+ 1 分</small></span><svg class="swipeHint" role="img" aria-label="右滑猜中" viewBox="0 0 48 64"><path d="M10 8l28 24-28 24"/></svg></span></div><div class="wordPortal wordPortalLeft" aria-hidden="true"><span class="portalShadow"></span><span class="portalShell"></span></div><div class="wordPortal wordPortalRight" aria-hidden="true"><span class="portalShadow"></span><span class="portalShell"></span></div><div class="hud"><span class="score" id="who"></span><span class="timer" id="timer">2:00</span><span class="hudScore"><span class="score" id="score">0 分</span><span id="scoreChange" aria-hidden="true"></span></span></div><div class="word" id="word"><div class="wordHans" id="wordHans"></div><div class="wordHant" id="wordHant" lang="zh-Hant-TW"></div></div></div>
+<div class="screen between" id="between">
+ <section class="roundReview" aria-label="本轮猜词记录">
+  <div class="roundReviewToolbar" id="roundReviewFilters" role="group" aria-label="复盘筛选">
+   <button type="button" data-filter="all" aria-pressed="true">全部</button><button type="button" data-filter="pass" aria-pressed="false">只看跳过</button><button type="button" data-filter="slow" aria-pressed="false">用时最长</button>
+  </div>
+  <div aria-label="词语和用时" id="roundDetail"></div>
+ </section>
+ <div class="roundRight"><div class="roundLeft"><div class="sub" id="roundTitle"></div><h2 id="resultTitle">本轮结束</h2><div class="bigscore" id="roundScore"></div><div class="sub" id="stats"></div></div><div class="sub" hidden id="nextGuessNotice"></div><div class="board" hidden id="board"></div><button class="primary continueAction" id="nextPlayer"></button></div>
+</div>
+<div class="screen between" id="final"><div id="celebration" aria-hidden="true"></div><div id="podiumReveal" hidden><p role="status">正在揭晓成绩</p><div class="revealChart" aria-hidden="true"><div id="podiumBars"></div><div id="podiumLabels"></div></div></div><div class="finalHead"><h2 id="winner" aria-live="polite"></h2><div class="sub" id="finalSubtitle">所有玩家已完成</div></div><div class="final" id="finalCards"></div><div class="finalActions"><button class="small" id="shareResult">分享成绩图片</button><button class="small" id="finalExport">导出全部记录</button><button class="primary continueAction" id="restart">再来一局</button></div></div>
+<div class="screen between" id="historyScreen">
+  <header class="historyHeader"><div class="wmTop"><h2>游戏记录</h2><button class="small" id="backSetup">返回主页</button></div><div class="sub" id="historyStats"></div></header>
+  <div class="historyContent">
+    <div class="board" id="historyList"></div>
+    <section class="settingPanel historyGroup" aria-labelledby="historyBackupHeading">
+      <h3 class="settingHeading" id="historyBackupHeading">备份与迁移</h3>
+      <div class="historyPair"><button class="small" id="historyExport">导出记录 <span aria-hidden="true">↓</span></button><button class="small" id="historyImport">导入记录 <span aria-hidden="true">↑</span></button></div>
+    </section>
+    <section class="settingPanel historyGroup" aria-labelledby="historyCleanupHeading">
+      <h3 class="settingHeading" id="historyCleanupHeading">清理记录</h3>
+      <div class="historyPair"><button class="small" id="resetSeen">清空已出现词</button><button class="small" id="resetHistory">清空对局记录</button></div>
+    </section>
+  </div>
+</div><div class="confirmOverlay" id="importPreview" role="dialog" aria-modal="true" aria-labelledby="importPreviewTitle" aria-describedby="importSummary"><div class="confirmPanel"><h2 id="importPreviewTitle">导入记录预览</h2><div class="pauseActions"><button id="cancelImport" type="button">取消</button><button id="confirmImport" type="button">确认合并</button></div><p id="importSummary"></p></div></div><div class="rotate" id="rotateNotice">请把手机横过来 ↻</div>
+<div aria-live="polite" id="importWork" role="status"><div class="workPanel"><div class="workTitle">正在导入记录</div><div class="workNote" id="importWorkStage">准备读取文件…</div><div class="workTrack"><div class="workFill" id="importWorkFill"></div></div><div class="workNote" id="importWorkPercent">0%</div><button id="importWorkCancel" type="button">取消导入</button></div></div><script src="./js/words.js"></script>
+<script src="./js/audio.js"></script>
+<script src="./js/app.js"></script>
+</body></html>
