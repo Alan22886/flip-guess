@@ -8,7 +8,13 @@ const FORMAT='cross-strait-charades-progress';
 const STATES=Object.freeze({SETUP:'setup',READY:'ready',COUNTDOWN:'countdown',RUNNING:'running',PAUSED:'paused',ROUND_END:'roundEnd',FINAL:'final'});
 let phase=STATES.SETUP,screenId='setup',mode='team',players=[],results=[],roundIndex=0,teamColors={},selected=new Set(Object.keys(BANK)),nameValues=new Map();
 const WORD_ACTION_COOLDOWN=260;
-let duration=120,penalty=false,deck=[],word=null,score=0,correct=0,passed=0,roundWords=[],undoStack=[],lastAction=0;
+// Each player's turn has three free skips; every skip after that costs a point.
+const FREE_SKIPS=3;
+let duration=120,deck=[],word=null,score=0,correct=0,passed=0,fouls=0,roundWords=[],undoStack=[],lastAction=0;
+// Rounds last 1–2.5 minutes. Adding ?quick to the address gives 3-second rounds for tests and device checks.
+const QUICK_ROUND_SECONDS=3;
+function quickRounds(){return new URLSearchParams(location.search).has('quick')}
+function roundSeconds(){return quickRounds()?QUICK_ROUND_SECONDS:Math.round(Number($('duration').value)*60)}
 let matchWords=new Set(),allowReuse=false;
 let lastTickSecond=null,lastSoundBeat=null;
 const orientation=matchMedia('(orientation: landscape)');
@@ -77,8 +83,8 @@ function loadProgress(){
  if(validCheckpoint(data.checkpoint))DATA.checkpoint=data.checkpoint;
 }
 function validCheckpoint(value){
- return value&&['team','solo'].includes(value.mode)&&[3,120,180,240,300].includes(value.duration)&&
-  typeof value.penalty==='boolean'&&typeof value.allowReuse==='boolean'&&
+ return value&&['team','solo'].includes(value.mode)&&[QUICK_ROUND_SECONDS,60,90,120,150,180,240,300].includes(value.duration)&&
+  typeof value.allowReuse==='boolean'&&
   Array.isArray(value.categories)&&value.categories.every(name=>typeof name==='string')&&
   Array.isArray(value.used)&&value.used.every(word=>typeof word==='string')&&
   Array.isArray(value.players)&&value.players.length>0&&value.players.length<=360&&
@@ -91,7 +97,7 @@ function validCheckpoint(value){
    round.team===value.players[index].team&&Array.isArray(round.words));
 }
 function saveCheckpoint(){
- DATA.checkpoint={mode,players,results,duration,penalty,teamColors,categories:[...selected],
+ DATA.checkpoint={mode,players,results,duration,teamColors,categories:[...selected],
   allowReuse,used:[...matchWords]};
  DATA.save();
 }
@@ -99,7 +105,7 @@ function rememberSettings(){
  storage.save(SETTINGS_KEY,{
   mode:selectedMode(),teamCount:Number($('teamCount').value),soloCount:Number($('soloCount').value),
   sizes:[...$('teamConfig').querySelectorAll('input')].map(input=>Number(input.value)),
-  duration:Number($('duration').value),penalty:$('penalty').checked,names:[...nameValues],
+  duration:Number($('duration').value),names:[...nameValues],
   categories:[...selected],swipeStyle:$('game').dataset.swipeStyle,
  });
 }
@@ -110,11 +116,12 @@ function restoreSettings(){
   $('swipePreference').querySelector(`[value="${saved.swipeStyle}"]`).checked=true;
  }
  if(saved.mode==='solo')$('mode').querySelector('[value="solo"]').checked=true;
- for(const [id,min,max] of [['teamCount',2,12],['soloCount',1,30],['duration',1,5]]){
+ for(const [id,min,max] of [['teamCount',2,12],['soloCount',1,30]]){
   const n=saved[id];
   if(Number.isInteger(n)&&n>=min&&n<=max)$(id).value=n;
  }
- $('penalty').checked=saved.penalty===true;
+ // Minutes in half steps; older saves (whole minutes up to 5) clamp to the 2.5-minute maximum.
+ if(Number.isFinite(saved.duration))$('duration').value=String(Math.min(2.5,Math.max(1,Math.round(saved.duration*2)/2)));
  if(Array.isArray(saved.names))nameValues=new Map(saved.names.filter(entry=>
    Array.isArray(entry)&&typeof entry[0]==='string'&&typeof entry[1]==='string'));
  if(Array.isArray(saved.categories)){
@@ -310,7 +317,7 @@ function refreshWord(immediate=false){
  };
  if(immediate)fit();else requestAnimationFrame(fit);
 }
-function updateHUD(){const p=currentPlayer();if(!p)return;const who=$('who');who.replaceChildren();const name=document.createElement('span');name.textContent=p.label;const verb=document.createElement('span');verb.className='hudVerb';verb.textContent='猜';who.append(name,verb);$('score').textContent=score+' 分';$('timer').textContent=formatTime(remaining);$('undoAction').disabled=!(phase===STATES.RUNNING&&undoStack.length)}
+function updateHUD(){const p=currentPlayer();if(!p)return;const who=$('who');who.replaceChildren();const name=document.createElement('span');name.textContent=p.label;const verb=document.createElement('span');verb.className='hudVerb';verb.textContent='猜';who.append(name,verb);$('score').textContent=score+' 分';$('timer').textContent=formatTime(remaining);$('undoAction').disabled=!(phase===STATES.RUNNING&&undoStack.length);$('foulAction').disabled=!(phase===STATES.RUNNING&&word);$('passHint').textContent=passed<FREE_SKIPS?`免费 ${FREE_SKIPS-passed} 次`:'− 1 分'}
 function formatTime(ms){const secs=Math.max(0,Math.ceil(ms/1000));return Math.floor(secs/60)+':'+String(secs%60).padStart(2,'0')}
 function vibrate(pattern){try{navigator.vibrate?.(pattern)}catch{}}
 function countdownStart(){
@@ -438,7 +445,7 @@ function lockRoundHudWidth(){
 function beginRound(){
  sound.unlock();
  setPhase(STATES.READY);
- score=correct=passed=0;
+ score=correct=passed=fouls=0;
  remaining=duration*1000;
  wordStartRemaining=remaining;
  roundWords=[];
@@ -452,7 +459,7 @@ function beginRound(){
  hud.style.removeProperty('--round-hud-width');
  // Reserve digits for the fastest possible score changes during this round.
  const digits=String(Math.ceil(duration*1000/WORD_ACTION_COOLDOWN)).length;
- hud.querySelector('.hudScore').dataset.reserve=(penalty?'-':'')+'8'.repeat(digits)+' 分';
+ hud.querySelector('.hudScore').dataset.reserve='-'+'8'.repeat(digits)+' 分';
  $('pauseOverlay').classList.remove('on');
  screen('game');
  refreshWord();
@@ -489,18 +496,29 @@ function action(kind,customFeedback=false){
  lastAction=now;
  const timeLeft=Math.max(0,deadline-now);
  const elapsedMs=Math.max(0,Math.round(wordStartRemaining-timeLeft));
- sound.feedback(kind);
- if(!customFeedback)flashTapSide(kind);
- undoStack.push({word,score,correct,passed,elapsedMs,length:roundWords.length});
+ if(kind!=='foul'){
+  sound.feedback(kind);
+  if(!customFeedback)flashTapSide(kind);
+ }
+ undoStack.push({word,score,correct,passed,fouls,elapsedMs,length:roundWords.length});
  roundWords.push({word:word.w,traditional:wordTraditional(word.w),kind,elapsedMs});
  wordStartRemaining=timeLeft;
- const delta=kind==='correct'?1:penalty?-1:0;
+ // A foul (the describer said part of the word) voids the word: no point either way.
+ const delta=kind==='correct'?1:kind==='pass'&&passed>=FREE_SKIPS?-1:0;
  score+=delta;
- if(kind==='correct'){correct++;vibrate(35)}else passed++;
+ if(kind==='correct'){correct++;vibrate(35)}else if(kind==='pass')passed++;else fouls++;
  updateHUD();
  showScoreChange(delta);
  if(!nextWord(customFeedback&&$('game').dataset.swipeStyle==='word'&&!reduceMotion.matches))finishRound();
  return true;
+}
+function foul(){
+ if(!canSelectWord())return;
+ const button=$('foulAction');
+ button.getAnimations().forEach(animation=>animation.cancel());
+ button.animate(reduceMotion.matches?[{filter:'brightness(1.18)'},{filter:'none'}]:
+  [{scale:.94},{scale:1}],{duration:180,easing:'ease-out'});
+ action('foul');
 }
 function undo(){
  if(phase!==STATES.RUNNING||!undoStack.length)return;
@@ -511,9 +529,10 @@ function undo(){
  button.animate(reduceMotion.matches?[{filter:'brightness(1.18)'},{filter:'none'}]:
   [{scale:.94},{scale:1}],{duration:180,easing:'ease-out'});
  const kind=roundWords.at(-1).kind;
+ const sided=kind!=='foul';
  const wordMode=$('game').dataset.swipeStyle==='word';
- const previous=wordMode&&!reduceMotion.matches?copyWordForMotion():null;
- if(!wordMode)flashTapSide(kind,true);
+ const previous=sided&&wordMode&&!reduceMotion.matches?copyWordForMotion():null;
+ if(sided&&!wordMode)flashTapSide(kind,true);
  $('scoreChange').getAnimations().forEach(animation=>animation.cancel());
  $('score').getAnimations().forEach(animation=>animation.cancel());
  if(word){
@@ -527,6 +546,7 @@ function undo(){
  score=old.score;
  correct=old.correct;
  passed=old.passed;
+ fouls=old.fouls;
  roundWords.length=old.length;
  DATA.seen.add(wordKey(word.w));
  saveCheckpoint();
@@ -545,11 +565,17 @@ function renderRoundReview(filter='all'){
  for(const [index,w] of entries){
  if(filter==='pass'&&w.kind!=='pass')continue;
  const el=document.createElement('span');
- el.className='detailLine '+(w.kind==='correct'?'isCorrect':'isPass');
+ el.className='detailLine '+({correct:'isCorrect',foul:'isFoul'}[w.kind]||'isPass');
  const badge=document.createElement('span');
  badge.className='detailOrder';
  badge.textContent=index+1;
  el.append(badge,w.word+(w.traditional!==w.word?' / '+w.traditional:''));
+ if(w.kind==='foul'){
+  const tag=document.createElement('small');
+  tag.className='detailTag';
+  tag.textContent='犯规';
+  el.append(tag);
+ }
  const row=document.createElement('div');
  row.className='roundWordRow';
  const time=document.createElement('span');
@@ -576,7 +602,7 @@ function renderRoundReview(filter='all'){
  }
  detail.scrollTop=0;
 }
-async function finishRound(timedOut=false){if(phase!==STATES.RUNNING&&phase!==STATES.COUNTDOWN)return;setPhase(STATES.ROUND_END);remaining=0;vibrate([160,70,160]);const p=currentPlayer();results.push({team:p.team,label:p.label,score,passed,correctCount:correct,words:roundWords.map(w=>({...w}))});if(roundIndex===players.length-1)recordMatch();else saveCheckpoint();$('roundTitle').textContent=p.label+' 完成';$('roundTitle').style.color=playerColor(p,roundIndex);$('roundScore').textContent=score+' 分';$('stats').textContent=`猜中 ${correct} · 跳过 ${passed}${penalty?'（扣 '+passed+' 分）':''}`;$('board').innerHTML=results.map((r,i)=>`<div class="row"><span style="color:${playerColor(r,i)}">${escapeHTML(r.label)}</span><strong>${r.score} 分</strong></div>`).join('');renderRoundReview();const next=players[roundIndex+1];const btn=$('nextPlayer');btn.replaceChildren();if(next){setRoleButton(btn,players,next);$('nextGuessNotice').textContent=next.label+' 准备猜词'}else{btn.textContent='查看最终排名';$('nextGuessNotice').textContent='所有玩家已完成，准备查看最终成绩'}if(timedOut){
+async function finishRound(timedOut=false){if(phase!==STATES.RUNNING&&phase!==STATES.COUNTDOWN)return;setPhase(STATES.ROUND_END);remaining=0;vibrate([160,70,160]);const p=currentPlayer();results.push({team:p.team,label:p.label,score,passed,correctCount:correct,fouls,words:roundWords.map(w=>({...w}))});if(roundIndex===players.length-1)recordMatch();else saveCheckpoint();$('roundTitle').textContent=p.label+' 完成';$('roundTitle').style.color=playerColor(p,roundIndex);$('roundScore').textContent=score+' 分';$('stats').textContent=`猜中 ${correct} · 跳过 ${passed}${passed>FREE_SKIPS?'（扣 '+(passed-FREE_SKIPS)+' 分）':''}${fouls?' · 犯规 '+fouls:''}`;$('board').innerHTML=results.map((r,i)=>`<div class="row"><span style="color:${playerColor(r,i)}">${escapeHTML(r.label)}</span><strong>${r.score} 分</strong></div>`).join('');renderRoundReview();const next=players[roundIndex+1];const btn=$('nextPlayer');btn.replaceChildren();if(next){setRoleButton(btn,players,next);$('nextGuessNotice').textContent=next.label+' 准备猜词'}else{btn.textContent='查看最终排名';$('nextGuessNotice').textContent='所有玩家已完成，准备查看最终成绩'}if(timedOut){
   sound.feedback('roundEnd');
   if(landscape()&&!reduceMotion.matches){
    await playRoundTransition();
@@ -662,7 +688,7 @@ async function showFinal(){
  const place=entry=>rankingPosition(ranking,entry);
  const tiedFirst=ranking.filter(r=>r.score===ranking[0]?.score).length>1;
  const members=r=>mode==='solo'
-  ? `<span>猜中 ${r.members[0]?.correctCount||0} · 跳过 ${r.members[0]?.passed||0}</span>`
+  ? `<span>猜中 ${r.members[0]?.correctCount||0} · 跳过 ${r.members[0]?.passed||0}${r.members[0]?.fouls?' · 犯规 '+r.members[0].fouls:''}</span>`
   : r.members.map(p=>`<div class="podiumMember"><span>${escapeHTML(p.label.replace(/^.*? · /,''))}</span><b>${p.score}<small> 分</small></b></div>`).join('');
  const teamName=r=>`<div class="podiumName">${escapeHTML(r.name)}</div>`;
  const crown=label=>`<svg viewBox="0 0 28 24" role="img" aria-label="${label}" fill="currentColor"><path d="M2 5l7 6 5-9 5 9 7-6-3 14H5L2 5Zm4 16h16v2H6z"/></svg>`;
@@ -774,7 +800,7 @@ function renderFireworks(layer,bursts){
 function updateWordWarning(){
  const words=selectedWords();
  const fresh=words.filter(({w})=>!DATA.seen.has(wordKey(w))).length;
- const seconds=Number($('duration').value)===1?3:Number($('duration').value)*60;
+ const seconds=roundSeconds();
  // Allow one initial word per turn, then budget roughly one every eight seconds.
  const target=getRoster().length*Math.ceil(seconds/8);
  const warning=fresh<target;
@@ -798,12 +824,11 @@ function renderSavedMatch(){
 function resumeSavedMatch(){
  const saved=DATA.checkpoint;
  if(phase!==STATES.SETUP||!saved)return;
- ({mode,players,results,duration,penalty,teamColors,allowReuse}=saved);
+ ({mode,players,results,duration,teamColors,allowReuse}=saved);
  selected=new Set(saved.categories.filter(name=>Object.hasOwn(BANK,name)));
  matchWords=new Set(saved.used);
  roundIndex=results.length;
  deck=[];
- $('passHint').textContent=penalty?'− 1 分':'不扣分';
  beginRound();
 }
 function discardSavedMatch(){
@@ -826,9 +851,7 @@ function startGame(){
  roundIndex=0;
  matchWords=new Set();
  allowReuse=!$('launchReuseLabel').hidden&&$('reuseWords').checked;
- penalty=$('penalty').checked;
- duration=Number($('duration').value)===1?3:Number($('duration').value)*60;
- $('passHint').textContent=penalty?'− 1 分':'不扣分';
+ duration=roundSeconds();
  buildDeck();
  if(!deck.length)return showMessage('所选类别没有可用词语，请补选类别或允许复用旧词。');
  rememberSettings();
@@ -845,7 +868,7 @@ function addAudit(details,event='game_ended'){
 function audit(event){
  const player=currentPlayer()||{};
  addAudit({player:player.label||'',team:player.team||null,roundIndex,
-  secondsRemaining:Math.ceil(remaining/1000),score,correctCount:correct,passed,
+  secondsRemaining:Math.ceil(remaining/1000),score,correctCount:correct,passed,fouls,
   words:roundWords.map(x=>({...x})),currentWord:word?.w||null,completedRounds:results.map(r=>({...r}))},event);
 }
 function canEndGame(){
@@ -874,9 +897,9 @@ function setRoleButton(button,roster,guess){
  if(roles.description)addLine(roles.description,'准备描述','nextButtonDesc');
  addLine(roles.guess,'准备猜','nextButtonGuess');
 }
-function syncLaunch(){const active=phase===STATES.SETUP&&screenId==='setup'&&landscape();$('landscapeLaunch').classList.toggle('active',active);renderSavedMatch();if(!active)return;clearSwapSelection();updateWordWarning();$('launchModeValue').textContent=selectedMode()==='solo'?'各自为战':`分组对战 · ${$('teamCount').value}组`;$('launchDurationValue').textContent=Number($('duration').value)===1?'测试模式 · 3 秒':$('duration').value+' 分钟';$('launchPenaltyValue').textContent=$('penalty').checked?'扣 1 分':'不扣分';const first=getRoster()[0];setRoleButton($('landscapeLaunchButton'),getRoster(),first)}
+function syncLaunch(){const active=phase===STATES.SETUP&&screenId==='setup'&&landscape();$('landscapeLaunch').classList.toggle('active',active);renderSavedMatch();if(!active)return;clearSwapSelection();updateWordWarning();$('launchModeValue').textContent=selectedMode()==='solo'?'各自为战':`分组对战 · ${$('teamCount').value}组`;$('launchDurationValue').textContent=quickRounds()?`测试模式 · ${QUICK_ROUND_SECONDS} 秒`:$('duration').value+' 分钟';$('launchPenaltyValue').textContent=`${FREE_SKIPS} 次后扣 1 分`;const first=getRoster()[0];setRoleButton($('landscapeLaunchButton'),getRoster(),first)}
 function renderHistoryStats(){$('historyInfo').textContent=`已出现 ${DATA.seen.size} / ${allWordSet.size} 词 · 历史 ${DATA.matches.length} 局`}
-function refreshHistory(){renderHistoryStats();$('historyStats').textContent=$('historyInfo').textContent;const list=$('historyList');list.replaceChildren();if(!DATA.matches.length){list.innerHTML='<div class="sub">暂无已完成对局</div>'}for(const g of [...DATA.matches].reverse()){const details=document.createElement('details'),summary=document.createElement('summary'),head=document.createElement('span'),winner=document.createElement('strong');head.textContent=(g.date?new Date(g.date).toLocaleString('zh-CN'):'未知日期')+' · '+(g.mode==='team'?'分组':'个人')+' · '+(g.players||g.results?.length||0)+'人'+(g.scoring==='average'?' · 按平均分排名':'');winner.textContent=g.winner||'查看记录';summary.append(head,winner);details.append(summary);const rounds=document.createElement('div');rounds.className='historyRounds';for(const [i,r] of (g.results||[]).entries()){const section=document.createElement('section');section.className='historyPlayer';const title=document.createElement('div');title.className='historyPlayerHead';title.textContent=`#${i+1} · ${r.label||'玩家'} · ${r.score??0} 分（猜中 ${r.correctCount??0} / 跳过 ${r.passed??0}）`;const words=document.createElement('div');words.className='historyWords';for(const [j,w] of (r.words||[]).entries()){const item=document.createElement('div');item.className='historyWord '+(w.kind==='correct'?'correct':'pass');const name=document.createElement('span');name.textContent=(j+1)+'. '+(w.word||w.simplified||'未知词')+(w.traditional&&w.traditional!==w.word?' / '+w.traditional:'');const status=document.createElement('strong');status.textContent=w.kind==='correct'?'✓ 猜中':'× 跳过';item.append(name,status);words.append(item)}if(!r.words?.length)words.textContent='此回合没有逐词明细';section.append(title,words);rounds.append(section)}details.append(rounds);list.append(details)}if(DATA.audit.length){const section=document.createElement('details');const title=document.createElement('summary');title.textContent='中断 / 重来日志（'+DATA.audit.length+' 条）';section.append(title);for(const a of DATA.audit.slice(-30).reverse()){const row=document.createElement('div');row.className='row';row.textContent=`${a.date||''} · ${a.player||'玩家'} · ${a.event==='game_ended'?'结束游戏':'重来本轮'} · ${a.score||0}分`;section.append(row)}list.append(section)}}
+function refreshHistory(){renderHistoryStats();$('historyStats').textContent=$('historyInfo').textContent;const list=$('historyList');list.replaceChildren();if(!DATA.matches.length){list.innerHTML='<div class="sub">暂无已完成对局</div>'}for(const g of [...DATA.matches].reverse()){const details=document.createElement('details'),summary=document.createElement('summary'),head=document.createElement('span'),winner=document.createElement('strong');head.textContent=(g.date?new Date(g.date).toLocaleString('zh-CN'):'未知日期')+' · '+(g.mode==='team'?'分组':'个人')+' · '+(g.players||g.results?.length||0)+'人'+(g.scoring==='average'?' · 按平均分排名':'');winner.textContent=g.winner||'查看记录';summary.append(head,winner);details.append(summary);const rounds=document.createElement('div');rounds.className='historyRounds';for(const [i,r] of (g.results||[]).entries()){const section=document.createElement('section');section.className='historyPlayer';const title=document.createElement('div');title.className='historyPlayerHead';title.textContent=`#${i+1} · ${r.label||'玩家'} · ${r.score??0} 分（猜中 ${r.correctCount??0} / 跳过 ${r.passed??0}${r.fouls?' / 犯规 '+r.fouls:''}）`;const words=document.createElement('div');words.className='historyWords';for(const [j,w] of (r.words||[]).entries()){const item=document.createElement('div');item.className='historyWord '+({correct:'correct',foul:'foul'}[w.kind]||'pass');const name=document.createElement('span');name.textContent=(j+1)+'. '+(w.word||w.simplified||'未知词')+(w.traditional&&w.traditional!==w.word?' / '+w.traditional:'');const status=document.createElement('strong');status.textContent=w.kind==='correct'?'✓ 猜中':w.kind==='foul'?'犯规 · 不计分':'× 跳过';item.append(name,status);words.append(item)}if(!r.words?.length)words.textContent='此回合没有逐词明细';section.append(title,words);rounds.append(section)}details.append(rounds);list.append(details)}if(DATA.audit.length){const section=document.createElement('details');const title=document.createElement('summary');title.textContent='中断 / 重来日志（'+DATA.audit.length+' 条）';section.append(title);for(const a of DATA.audit.slice(-30).reverse()){const row=document.createElement('div');row.className='row';row.textContent=`${a.date||''} · ${a.player||'玩家'} · ${a.event==='game_ended'?'结束游戏':'重来本轮'} · ${a.score||0}分`;section.append(row)}list.append(section)}}
 function exportData(){const blob=new Blob([JSON.stringify(DATA.backup(),null,2)],{type:'application/json;charset=utf-8'});const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='滑动猜词_全部记录_'+new Date().toISOString().slice(0,10)+'.json';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000)}
 function progress(p,msg){$('importWork').classList.add('on');$('importWorkFill').style.width=p+'%';$('importWorkPercent').textContent=Math.round(p)+'%';$('importWorkStage').textContent=msg}
 function closeImportWork(){clearTimeout(importTimeout);$('importWork').classList.remove('on');importReader=null}
@@ -955,7 +978,7 @@ function shareResult(){
   setTimeout(()=>URL.revokeObjectURL(url),5000);
  },'image/png');
 }
-function upgradeSteppers(){document.querySelectorAll('#teamCount,#soloCount,#duration,#teamConfig input[type="number"]').forEach(input=>{if(input.dataset.stepperReady)return;input.dataset.stepperReady='1';const wrap=document.createElement('span');wrap.className='numberStepper';input.parentNode.insertBefore(wrap,input);wrap.append(input);input.readOnly=true;input.setAttribute('inputmode','none');for(const [delta,symbol,cls] of [[-1,'−','stepMinus'],[1,'+','stepPlus']]){const btn=document.createElement('button');btn.type='button';btn.className=cls;btn.textContent=symbol;btn.addEventListener('click',e=>{e.preventDefault();const lo=Number(input.min||1),hi=Number(input.max||30);input.value=String(Math.max(lo,Math.min(hi,Number(input.value)+delta)));input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}))});if(delta<0)wrap.insertBefore(btn,input);else wrap.append(btn)}if(input.id==='duration'){const sync=()=>wrap.classList.toggle('testDuration',Number(input.value)===1);input.addEventListener('input',sync);sync()}})}
+function upgradeSteppers(){document.querySelectorAll('#teamCount,#soloCount,#duration,#teamConfig input[type="number"]').forEach(input=>{if(input.dataset.stepperReady)return;input.dataset.stepperReady='1';const wrap=document.createElement('span');wrap.className='numberStepper';input.parentNode.insertBefore(wrap,input);wrap.append(input);input.readOnly=true;input.setAttribute('inputmode','none');for(const [delta,symbol,cls] of [[-1,'−','stepMinus'],[1,'+','stepPlus']]){const btn=document.createElement('button');btn.type='button';btn.className=cls;btn.textContent=symbol;btn.addEventListener('click',e=>{e.preventDefault();const lo=Number(input.min||1),hi=Number(input.max||30),step=Number(input.step||1);input.value=String(Math.max(lo,Math.min(hi,Number(input.value)+delta*step)));input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}))});if(delta<0)wrap.insertBefore(btn,input);else wrap.append(btn)}})}
 
 // 词库唯一数据层：内置 BANK + 用户新增 + 手动删除。只在设置页编辑。
 const WORDS_KEY='guess_wordbank_custom_v1';
@@ -1489,7 +1512,7 @@ function bind(){
   document.addEventListener(type,event=>event.preventDefault(),{passive:false});
  }
  $('messageClose').addEventListener('click',()=>$('messageDialog').close());
- $('mode').addEventListener('change',configTeams);$('teamCount').addEventListener('input',configTeams);$('soloCount').addEventListener('input',renderNames);$('duration').addEventListener('input',syncLaunch);$('penalty').addEventListener('change',syncLaunch);
+ $('mode').addEventListener('change',configTeams);$('teamCount').addEventListener('input',configTeams);$('soloCount').addEventListener('input',renderNames);$('duration').addEventListener('input',syncLaunch);
  $('toggleCategories').addEventListener('click',event=>{
   const button=event.currentTarget;
   const expanded=button.getAttribute('aria-expanded')!=='true';
@@ -1499,6 +1522,7 @@ function bind(){
  });
  $('all').addEventListener('click',()=>{if(selected.size===Object.keys(BANK).length)selected.clear();else Object.keys(BANK).forEach(k=>selected.add(k));renderCats()});
  bindContinue('start',startGame);bindContinue('startTop',startGame);bindContinue('landscapeLaunchButton',startGame);
+ $('foulAction').addEventListener('click',foul);
  $('undoAction').addEventListener('click',undo);$('pauseAction').addEventListener('click',pause);bindContinue('resumeAction',resume);
  $('roundReviewFilters').addEventListener('click',event=>{
   const button=event.target.closest('button[data-filter]');

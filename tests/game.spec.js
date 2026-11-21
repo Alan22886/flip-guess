@@ -39,7 +39,8 @@ const chooseSwipeStyle = async (page, label) => {
   await page.getByText(label,{exact:true}).tap();
 };
 const tick = async (page, ms) => { await page.clock.runFor(ms); };
-const testDuration = page => page.locator('.durationRow .stepMinus').tap();
+// 3-second rounds for tests and device checks: the ?quick address flag, not a player-facing option.
+const testDuration = page => page.evaluate(() => history.replaceState(null, '', location.pathname + '?quick'));
 
 test.beforeEach(async ({ page }) => {
   await page.setViewportSize(portrait);
@@ -151,11 +152,10 @@ test('team setup, rotation, alternating roles, scoring, undo, podium and restart
     .toEqual(['namePlayerLabel', 'INPUT', 'nameOrderBadge']);
   await expect(firstRow.locator('.nameOrderBadge')).toHaveCSS('background-color','rgb(255, 255, 255)');
   await testDuration(page);
-  await tap(page, 'penalty');
   await page.setViewportSize(landscape);
   await expect(id(page, 'launchDurationValue')).toContainText('3 秒');
   await expect(id(page, 'launchModeValue')).toContainText('3组');
-  await expect(id(page, 'launchPenaltyValue')).toHaveText('扣 1 分');
+  await expect(id(page, 'launchPenaltyValue')).toHaveText('3 次后扣 1 分');
   await expect(id(page, 'landscapeLaunchButton')).toHaveCSS('animation-name','continueBreathe');
   const breath=await id(page,'landscapeLaunchButton').evaluate(el=>el.getAnimations()[0].effect.getKeyframes()[1].clipPath);
   expect(breath).toContain('inset(2% 1.25%');
@@ -224,9 +224,8 @@ test('team setup, rotation, alternating roles, scoring, undo, podium and restart
   expect(await id(page, 'wordHans').textContent()).not.toBe(firstWord);
   await tick(page, 280);
   await tap(page, 'pass');
-  await expect(id(page, 'score')).toHaveText('0 分');
-  await expect(id(page,'scoreChange')).toHaveText('−1');
-  await expect(id(page,'scoreChange')).toHaveCSS('color','rgb(255, 144, 155)');
+  await expect(id(page, 'score')).toHaveText('1 分');
+  await expect(id(page, 'passHint')).toHaveText('免费 2 次');
   await tap(page, 'undoAction');
   await expect(page.locator('.wordInTransit')).toHaveCount(2);
   expect(await id(page,'undoAction').evaluate(el=>el.getAnimations().length)).toBe(1);
@@ -1038,8 +1037,8 @@ test('reopening restores the last setup and resumes at the first incomplete turn
   await page.locator("#nameInputs input[data-key='A组-0']").fill('小安');
   await page.locator("#nameInputs input[data-key='B组-0']").fill('小白');
   await page.locator('#teamConfig label').last().locator('.stepMinus').tap();
+  await page.locator('.durationRow .stepMinus').tap();
   await testDuration(page);
-  await tap(page,'penalty');
   await page.locator('#cats .cat').first().tap();
   await launch(page);
   await tick(page,3080);
@@ -1053,8 +1052,7 @@ test('reopening restores the last setup and resumes at the first incomplete turn
   await expect(id(page,'setupSavedSummary')).toContainText('已完成 1 / 3 人');
   await expect(page.locator("#nameInputs input[data-key='A组-0']")).toHaveValue('小安');
   await expect(page.locator('#teamConfig input').last()).toHaveValue('1');
-  await expect(id(page,'duration')).toHaveValue('1');
-  await expect(id(page,'penalty')).toBeChecked();
+  await expect(id(page,'duration')).toHaveValue('1.5');
   await expect(page.locator('#cats .cat').first()).toHaveAttribute('aria-pressed','false');
   await tap(page,'setupRestore');
   await expect(id(page,'portraitProgressCount')).toHaveText('已完成 1 / 3 人');
@@ -1129,7 +1127,6 @@ test('swipe moves both word lines toward a fixed portal and scores once', async 
   await page.clock.install();
   await page.goto(site);
   await chooseSwipeStyle(page,'移动单词');
-  await tap(page,'penalty');
   await launch(page);
   await tick(page,3080);
   const hud=page.locator('#game .hud');
@@ -1150,7 +1147,7 @@ test('swipe moves both word lines toward a fixed portal and scores once', async 
   expect(Math.max(...initialLayout.centers)-Math.min(...initialLayout.centers)).toBeLessThan(1);
   expect(Math.max(...initialLayout.gaps)-Math.min(...initialLayout.gaps)).toBeLessThan(1);
   expect(Math.min(...initialLayout.gaps)).toBeGreaterThan(23);
-  await expect(id(page,'passHint')).toHaveText('− 1 分');
+  await expect(id(page,'passHint')).toHaveText('免费 3 次');
   await expect(page.locator('#pass .taplabel')).not.toContainText('←');
   await expect(page.locator('#pass .swipeHint')).toHaveAccessibleName('左滑跳过');
   await expect(page.locator('#correct .swipeHint')).toHaveAccessibleName('右滑猜中');
@@ -1177,6 +1174,13 @@ test('swipe moves both word lines toward a fixed portal and scores once', async 
   expect(rightPortal.x+rightPortal.width).toBe(landscape.width-13);
   const leftArrow=await hint.boundingBox();
   expect(Math.abs(leftArrow.y+leftArrow.height/2-leftPortal.y-leftPortal.height/2)).toBeLessThan(.5);
+  // Use up the three free skips so the swipes below show a single −1 per pass.
+  for(let i=0;i<3;i++){
+    await tap(page,'pass');
+    await tick(page,300);
+  }
+  await expect(id(page,'passHint')).toHaveText('− 1 分');
+  await expect(id(page,'score')).toHaveText('0 分');
   const drag=async (from,to,target='game')=>page.evaluate(({from,to,target})=>{
     const origin=document.getElementById(target);
     const game=document.getElementById('game');
@@ -1446,4 +1450,125 @@ test('solo colors persist outside the white gameplay HUD', async ({page})=>{
   await expect(page.locator('.second .podiumName')).toHaveCSS('background-color',palette[1]);
   await expect(page.locator('.third .podiumName')).toHaveCSS('background-color',palette[2]);
   await expect(page.locator('.podiumOther .podiumName')).toHaveCSS('background-color',palette[3]);
+});
+
+test('round length steps from one to two and a half minutes in half minutes', async ({ page }) => {
+  await page.clock.install();
+  await page.goto(site);
+  const duration = id(page, 'duration');
+  const step = sign => page.locator(`.durationRow .step${sign}`).tap();
+  await expect(duration).toHaveValue('2');
+  for (const expected of ['1.5', '1', '1']) {
+    await step('Minus');
+    await expect(duration).toHaveValue(expected);
+  }
+  await expect(duration).not.toHaveCSS('color', 'rgba(0, 0, 0, 0)');
+  for (const expected of ['1.5', '2', '2.5', '2.5']) {
+    await step('Plus');
+    await expect(duration).toHaveValue(expected);
+  }
+  await step('Minus');
+  await step('Minus');
+  await page.setViewportSize(landscape);
+  await expect(id(page, 'launchDurationValue')).toHaveText('1.5 分钟');
+  await tap(page, 'landscapeLaunchButton');
+  await tick(page, 3080);
+  await expect(id(page, 'timer')).toHaveText('1:30');
+  await tick(page, 60_000);
+  await expect(id(page, 'timer')).toHaveText('0:30');
+  await tick(page, 30_100);
+  await expect(id(page, 'roundScore')).toBeVisible();
+  await page.setViewportSize(portrait);
+  await page.reload();
+  await expect(duration).toHaveValue('1.5');
+});
+
+test('round lengths saved by the previous version map onto the new steps', async ({ page }) => {
+  for (const [saved, shown] of [[5, '2.5'], [3, '2.5'], [2, '2'], [1, '1']]) {
+    await page.goto(site);
+    await page.evaluate(value => localStorage.setItem('flip_guess_settings_v1', JSON.stringify({ duration: value })), saved);
+    await page.reload();
+    await expect(id(page, 'duration')).toHaveValue(shown);
+  }
+});
+
+test('a foul voids the word without changing the score', async ({ page }) => {
+  await page.clock.install();
+  await page.goto(site);
+  await testDuration(page);
+  await launch(page);
+  await expect(id(page, 'foulAction')).toBeDisabled();
+  await tick(page, 3080);
+  await tap(page, 'correct');
+  await tick(page, 300);
+  const fouled = await id(page, 'wordHans').textContent();
+  await tap(page, 'foulAction');
+  await expect(id(page, 'score')).toHaveText('1 分');
+  await expect(id(page, 'scoreChange')).not.toHaveText('犯规');
+  await expect(id(page, 'wordHans')).not.toHaveText(fouled);
+  await tick(page, 300);
+  await tap(page, 'undoAction');
+  await expect(id(page, 'wordHans')).toHaveText(fouled);
+  await expect(id(page, 'score')).toHaveText('1 分');
+  await tick(page, 300);
+  await tap(page, 'foulAction');
+  await tick(page, 3000);
+  await expect(id(page, 'stats')).toHaveText('猜中 1 · 跳过 0 · 犯规 1');
+  await expect(page.locator('#roundDetail .detailLine').nth(1)).toHaveText(new RegExp(`${RegExp.escape(fouled)}.*犯规`));
+  for (let turn = 1; turn < 4; turn++) {
+    await tap(page, 'nextPlayer');
+    await tick(page, 6150);
+  }
+  await tap(page, 'nextPlayer');
+  const backup = await fetchExport(page, 'finalExport');
+  expect(backup.matches[0].results[0].fouls).toBe(1);
+  expect(backup.matches[0].results[0].words.map(w => w.kind)).toEqual(['correct', 'foul']);
+});
+
+test('a foul in word-swipe mode can be undone', async ({ page }) => {
+  await page.clock.install();
+  await page.goto(site);
+  await chooseSwipeStyle(page, '移动单词');
+  await launch(page);
+  await tick(page, 3080);
+  const fouled = await id(page, 'wordHans').textContent();
+  await tap(page, 'foulAction');
+  await expect(id(page, 'wordHans')).not.toHaveText(fouled);
+  await tick(page, 300);
+  await tap(page, 'undoAction');
+  await expect(id(page, 'wordHans')).toHaveText(fouled);
+  await expect(id(page, 'score')).toHaveText('0 分');
+});
+
+test('each turn skips three words free, then every skip costs a point', async ({ page }) => {
+  await page.clock.install();
+  await page.goto(site);
+  await expect(id(page, 'penalty')).toHaveCount(0);
+  // Tap the far left: after a skip the red half briefly widens across the middle.
+  const skip = () => page.locator('#pass').tap({ position: { x: 60, y: 200 } });
+  await page.setViewportSize(landscape);
+  await expect(id(page, 'launchPenaltyValue')).toHaveText('3 次后扣 1 分');
+  await tap(page, 'landscapeLaunchButton');
+  await tick(page, 3080);
+  await expect(id(page, 'passHint')).toHaveText('免费 3 次');
+  for (const hint of ['免费 2 次', '免费 1 次', '− 1 分']) {
+    await skip();
+    await expect(id(page, 'score')).toHaveText('0 分');
+    await expect(id(page, 'passHint')).toHaveText(hint);
+    await tick(page, 300);
+  }
+  await skip();
+  await expect(id(page, 'score')).toHaveText('-1 分');
+  await expect(id(page, 'scoreChange')).toHaveText('−1');
+  await tick(page, 300);
+  await tap(page, 'undoAction');
+  await expect(id(page, 'score')).toHaveText('0 分');
+  await expect(id(page, 'passHint')).toHaveText('− 1 分');
+  await tick(page, 300);
+  await skip();
+  await tick(page, await page.evaluate(() => Math.ceil(deadline - performance.now() + 300)));
+  await expect(id(page, 'stats')).toHaveText('猜中 0 · 跳过 4（扣 1 分）');
+  await tap(page, 'nextPlayer');
+  await tick(page, 3080);
+  await expect(id(page, 'passHint')).toHaveText('免费 3 次');
 });

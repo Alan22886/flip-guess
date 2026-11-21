@@ -109,8 +109,7 @@ button.nameOrderBadge:focus-visible{outline:2px solid #7fb2ff;outline-offset:3px
 .configV11 .teamconfig label{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:0 0 0 10px;border-left:3px solid var(--team-color)}
 .configV11 .teamconfig input{width:92px;text-align:center}
 .configV11 .durationRow{display:flex;align-items:center;justify-content:space-between;gap:12px}.configV11 .durationRow select{min-width:125px}
-.configV11 .penaltyRow{display:flex;align-items:center;gap:12px;padding-top:12px;border-top:1px solid #3b3b3b;cursor:pointer}
-.configV11 #penalty{width:21px;height:21px;accent-color:#e65060;flex:none}
+.configV11 .penaltyRow{display:flex;align-items:center;gap:12px;margin:0;padding-top:12px;border-top:1px solid #3b3b3b;color:#cfcfcf}
 @media(orientation:landscape){.config.configV11{width:min(720px,100%)}}
 #landscapeLaunch{display:none;position:fixed;inset:0;z-index:80;background:#111;align-items:center;justify-content:center;padding:18vh 10vw}
 #landscapeLaunchButton{background:#fff;color:#111;border:0;border-radius:999px;font-size:clamp(22px,4.8vw,36px);font-weight:850;padding:18px 46px;max-width:90vw;min-height:68px;white-space:normal;text-align:center}
@@ -287,11 +286,6 @@ button.nameOrderBadge:focus-visible{outline:2px solid #7fb2ff;outline-offset:3px
 #landscapeLaunch .launchRule strong{font-size:clamp(17px,2.7vw,26px);color:#fff;white-space:nowrap;}
 #landscapeLaunch #landscapeLaunchButton{flex-shrink:0;max-width:100%;}
 @media(orientation:landscape) and (max-height:390px){#landscapeLaunch .launchContent{gap:16px}#landscapeLaunch .launchRule{padding:9px 8px;border-radius:15px}#landscapeLaunch #landscapeLaunchButton{min-height:54px;padding:10px 30px}}
-
-/* One step below two minutes selects the three-second test preset. */
-#setup .numberStepper.testDuration{position:relative}
-#setup .numberStepper.testDuration input{color:transparent!important}
-#setup .numberStepper.testDuration::after{content:"测试";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-weight:800;color:#fff;pointer-events:none;white-space:nowrap}
 
 .titleStage{position:relative;display:grid;justify-items:center;flex:none;width:100%;overflow:clip;overflow-clip-margin:4px}
 .titleStage .artTitle{width:max-content;touch-action:pan-y}
@@ -809,3 +803,12 @@ html,body{background:#000!important}
  .confirmPanel .pauseActions button{min-height:46px;font-size:16px}
  .historyPair button,.modeToggle span{font-size:15px}
 }
+
+/* Foul (犯规): the describer said part of the word, so it is voided for no points. Amber, like a yellow card. */
+#gameTools #foulAction:not(:disabled){background:#9a6c0c!important;color:#fff!important;opacity:1!important}
+#gameTools #foulAction:disabled{background:#4d3a12!important;color:#e6d3a6!important}
+.detailLine.isFoul{--word-result-color:#9a6c0c}
+#between #roundDetail .detailLine.isFoul{background:#9a6c0c!important;color:#fff}
+.detailLine.isFoul .detailOrder{color:#9a6c0c}
+.detailTag{margin-left:.5em;padding:1px 6px;border-radius:99px;background:rgba(0,0,0,.28);font-size:.78em;font-weight:800;white-space:nowrap}
+.historyWord.foul{background:#5c4512;border:1px solid #d9a93b}
